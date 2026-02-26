@@ -1,7 +1,4 @@
-
-<!-- cfr: https://console.firebase.google.com/project/realtime-app-aada2/database/realtime-app-aada2-default-rtdb/data	 -->
-
-
+	
 <!DOCTYPE html>
 <html lang="fr">
 <head>
@@ -13,6 +10,7 @@
 			--bg-color: #0f172a;
 			--card-bg: #1e293b;
 			--accent-color: #38bdf8;
+			--danger-color: #ef4444;
 			--text-main: #f8fafc;
 			--text-dim: #94a3b8;
 			--msg-bg: #334155;
@@ -33,13 +31,24 @@
 			padding: 15px 20px;
 			background: var(--card-bg);
 			border-bottom: 1px solid #334155;
-			text-align: center;
-			font-weight: bold;
-			font-size: 1.2rem;
+			display: flex;
+			justify-content: space-between;
+			align-items: center;
 			color: var(--accent-color);
+			font-weight: bold;
 		}
 
-		/* Zone de messages (Scrollable) */
+		#bulkDeleteBar {
+			display: none;
+			background: var(--danger-color);
+			color: white;
+			padding: 5px 15px;
+			border-radius: 20px;
+			cursor: pointer;
+			font-size: 0.8rem;
+		}
+
+		/* Zone de messages */
 		#chatContainer {
 			flex: 1;
 			overflow-y: auto;
@@ -51,27 +60,59 @@
 			scrollbar-color: var(--msg-bg) transparent;
 		}
 
+		.message-wrapper {
+			display: flex;
+			align-items: flex-start;
+			gap: 10px;
+			max-width: 90%;
+		}
+
 		.message-bubble {
-			max-width: 85%;
 			background: var(--msg-bg);
 			padding: 12px 16px;
 			border-radius: 15px 15px 15px 2px;
-			align-self: flex-start;
 			word-wrap: break-word;
+			white-space: pre-wrap; /* RÉSOUT LE PROBLÈME DES RETOURS À LA LIGNE */
 			position: relative;
 			animation: fadeIn 0.3s ease;
 			box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+			flex: 1;
 		}
+
+		.actions {
+			display: flex;
+			gap: 8px;
+			margin-top: 8px;
+			justify-content: flex-end;
+			border-top: 1px solid rgba(255,255,255,0.1);
+			padding-top: 5px;
+		}
+
+		.action-btn {
+			background: transparent;
+			border: none;
+			color: var(--text-dim);
+			cursor: pointer;
+			padding: 4px;
+			transition: color 0.2s;
+		}
+
+		.action-btn:hover { color: var(--accent-color); }
+		.btn-del:hover { color: var(--danger-color); }
 
 		.time {
-			display: block;
 			font-size: 0.7rem;
 			color: var(--text-dim);
-			margin-top: 5px;
-			text-align: right;
+			margin-right: auto;
 		}
 
-		/* Barre de saisie (Fixée en bas) */
+		.multi-select-check {
+			margin-top: 15px;
+			cursor: pointer;
+			accent-color: var(--accent-color);
+		}
+
+		/* Barre de saisie */
 		.input-area {
 			background: var(--card-bg);
 			padding: 15px;
@@ -90,12 +131,12 @@
 			resize: none;
 			font-size: 1rem;
 			outline: none;
-			max-height: 100px;
+			max-height: 150px;
 		}
 
 		textarea:focus { border-color: var(--accent-color); }
 
-		button {
+		#sendBtn {
 			background: var(--accent-color);
 			color: #0f172a;
 			border: none;
@@ -110,25 +151,20 @@
 			flex-shrink: 0;
 		}
 
-		button:active { transform: scale(0.9); }
-
 		@keyframes fadeIn {
 			from { opacity: 0; transform: translateY(10px); }
 			to { opacity: 1; transform: translateY(0); }
-		}
-
-		/* Responsive */
-		@media (max-width: 600px) {
-			.message-bubble { max-width: 90%; }
 		}
 	</style>
 </head>
 <body>
 
-<header>☁️ Cloud Notes Sync</header>
+<header>
+	<span>☁️ Cloud Notes Sync</span>
+	<div id="bulkDeleteBar" onclick="deleteSelected()">Supprimer la sélection (<span id="selCount">0</span>)</div>
+</header>
 
-<div id="chatContainer">
-	</div>
+<div id="chatContainer"></div>
 
 <div class="input-area">
 	<textarea id="msgInput" placeholder="Saisissez votre note..." rows="1"></textarea>
@@ -139,9 +175,8 @@
 
 <script type="module">
 	import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
-	import { getDatabase, ref, push, onValue, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js";
+	import { getDatabase, ref, push, onValue, serverTimestamp, remove } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js";
 
-	// // --- REMPLACEZ CE BLOC PAR VOTRE CONFIG REELLE ---
 	// const firebaseConfig = {
 	// 	apiKey: "VOTRE_API_KEY",
 	// 	authDomain: "realtime-app-aada2.firebaseapp.com",
@@ -163,7 +198,7 @@
 		appId: "1:84202207595:web:c52da2251e0428244cb42e",
 		measurementId: "G-MPRES3L1KJ"
 	};
-
+	
 	const app = initializeApp(firebaseConfig);
 	const db = getDatabase(app);
 	const messagesRef = ref(db, 'messages');
@@ -171,8 +206,10 @@
 	const chatContainer = document.getElementById('chatContainer');
 	const msgInput = document.getElementById('msgInput');
 	const sendBtn = document.getElementById('sendBtn');
+	const bulkDeleteBar = document.getElementById('bulkDeleteBar');
+	const selCountSpan = document.getElementById('selCount');
 
-	// ENVOYER un message
+	// ENVOYER
 	function sendMessage() {
 		const text = msgInput.value.trim();
 		if (text !== "") {
@@ -188,26 +225,78 @@
 	sendBtn.addEventListener('click', sendMessage);
 	msgInput.addEventListener('keypress', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } });
 
-	// ÉCOUTER les messages
+	// ÉCOUTER
 	onValue(messagesRef, (snapshot) => {
-		chatContainer.innerHTML = ""; // On nettoie pour re-afficher la liste
+		chatContainer.innerHTML = "";
 		const data = snapshot.val();
 		if (data) {
-			Object.values(data).forEach(msg => {
-				const div = document.createElement('div');
-				div.className = 'message-bubble';
+			Object.entries(data).forEach(([key, msg]) => {
+				const wrapper = document.createElement('div');
+				wrapper.className = 'message-wrapper';
 				
-				// Formatage de l'heure
+				const checkbox = document.createElement('input');
+				checkbox.type = 'checkbox';
+				checkbox.className = 'multi-select-check';
+				checkbox.dataset.id = key;
+				checkbox.onchange = updateBulkBar;
+
 				const date = msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : "...";
 				
-				div.innerHTML = `${msg.text} <span class="time">${date}</span>`;
-				chatContainer.appendChild(div);
+				wrapper.innerHTML = `
+					<div class="message-bubble" id="msg-${key}">
+						<div class="msg-content">${msg.text}</div>
+						<div class="actions">
+							<span class="time">${date}</span>
+							<button class="action-btn" onclick="copyText(\`${msg.text.replace(/`/g, '\\`')}\`)">
+								<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+							</button>
+							<button class="action-btn btn-del" onclick="deleteMsg('${key}')">
+								<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+							</button>
+						</div>
+					</div>
+				`;
+				wrapper.prepend(checkbox);
+				chatContainer.appendChild(wrapper);
 			});
-			chatContainer.scrollTop = chatContainer.scrollHeight; // Auto-scroll vers le bas
+			chatContainer.scrollTop = chatContainer.scrollHeight;
 		}
+		updateBulkBar();
 	});
 
-	// Auto-resize du textarea
+	// FONCTIONS ACTIONS
+	window.copyText = (text) => {
+		navigator.clipboard.writeText(text).then(() => {
+			alert("Copié dans le presse-papier !");
+		});
+	};
+
+	window.deleteMsg = (id) => {
+		if(confirm("Supprimer ce message ?")) {
+			remove(ref(db, `messages/${id}`));
+		}
+	};
+
+	window.updateBulkBar = () => {
+		const selected = document.querySelectorAll('.multi-select-check:checked');
+		if(selected.length > 0) {
+			bulkDeleteBar.style.display = 'block';
+			selCountSpan.innerText = selected.length;
+		} else {
+			bulkDeleteBar.style.display = 'none';
+		}
+	};
+
+	window.deleteSelected = () => {
+		const selected = document.querySelectorAll('.multi-select-check:checked');
+		if(confirm(`Supprimer ces ${selected.length} messages ?`)) {
+			selected.forEach(cb => {
+				remove(ref(db, `messages/${cb.dataset.id}`));
+			});
+		}
+	};
+
+	// Auto-resize
 	msgInput.addEventListener('input', function() {
 		this.style.height = 'auto';
 		this.style.height = (this.scrollHeight) + 'px';
@@ -216,3 +305,4 @@
 
 </body>
 </html>
+
